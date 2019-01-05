@@ -35,6 +35,7 @@ func main() {
 }
 ```
 
+Here `Any` is defined as an alias of `interface{}`.
 If you save the code as `range_select_example.go`, you can run it as follows:
 
 ```
@@ -53,9 +54,7 @@ $ go run range_select_example.go
 $ 
 ```
 
-Note that `Any` is defined as an alias of `interface{}`.
-
-`Select` method is defiend as follows:
+`Select` method is defined as follows:
 
 ```Go
 // Select creates an Enumerator which applies f to each of elements.
@@ -69,7 +68,7 @@ func (loop Enumerator) Select(f func(Any) Any) Enumerator {
 }
 ```
 
-Note that `Enumerator` is defined as `func(func(Any))`.
+Note that `Enumerator` is just a function type defined as `func(func(Any))`.
 
 `Range` is defined as follows:
 
@@ -91,3 +90,5 @@ Now you have seen the _whole_ implementation of the example.
 The space complexity is O(1) and you can `yield` values
 infinitely if you want.
 There is no artificial data structure.
+
+For more examples, see [linq_test.go](linq/linq_test.go).
