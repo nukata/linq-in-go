@@ -1,4 +1,4 @@
-// H24.11/28 - H31.1/4 by SUZUKI Hisao
+// H24.11/28 - H31.1/19 by SUZUKI Hisao
 
 // Package linq implements a sort of "LINQ to Objects" in Go.
 //
@@ -7,7 +7,9 @@
 package linq
 
 import (
+	"bufio"
 	"container/list"
+	"io"
 	"reflect"
 )
 
@@ -15,9 +17,9 @@ import (
 type Any = interface{}
 
 // Enumerator represents a sequence.
-// To be precise, it is a higher order function that applies the given
-// function to each element of the sequence which Enumerator represents.
-type Enumerator func(given func(element Any))
+// To be precise, it is a higher order function that applies the function
+// argument to each element of the sequence which Enumerator represents.
+type Enumerator func(yield func(element Any))
 
 // ToList creates a list from the sequence which Enumerator represents.
 func (loop Enumerator) ToList() *list.List {
@@ -65,12 +67,12 @@ func (loop Enumerator) AggregateWithExit(seed Any,
 	return seed
 }
 
-// token_t represents a token to break the enumeration.
-type token_t int
+// tokenT represents a token to break the enumeration.
+type tokenT int
 
 // recoverAsBreak makes the program recover from the panic which
 // had been raised with panic(&token).
-func recoverAsBreak(token *token_t) {
+func recoverAsBreak(token *tokenT) {
 	r := recover()
 	if r != nil && r != token {
 		panic(r)
@@ -80,7 +82,7 @@ func recoverAsBreak(token *token_t) {
 // LoopWithExit calls f(element, exit) for each element of Enumerator.
 // If f calls exit(), the enumeration will terminate.
 func (loop Enumerator) LoopWithExit(f func(Any, func())) {
-	var token token_t
+	var token tokenT
 	defer recoverAsBreak(&token)
 	exit := func() {
 		panic(&token)
@@ -269,23 +271,19 @@ func IntsFrom(n int) Enumerator {
 }
 
 // From creates an Enumerator from an argument.
-// If the argument is one of chan Any, *list.List, string, slice, or array,
-// the Enumerator will contain each element of the argument.
-// Otherwise the Enumerator contains the whole argument as its sole element.
+// If the argument is one of io.Reader, *list.List, string, slice, array
+// or chan, the Enumerator will yield each element of the argument.
+// Otherwise it will yield the whole argument as its sole element.
+// For io.Reader, it will yield each line as a string with (*Scanner) Text.
 func From(x interface{}) Enumerator {
 	switch seq := x.(type) {
-	case <-chan Any:
+	case io.Reader:
 		return func(yield func(Any)) {
-			for {
-				value, ok := <-seq
-				if !ok {
-					break
-				}
-				yield(value)
+			scanner := bufio.NewScanner(seq)
+			for scanner.Scan() {
+				yield(scanner.Text())
 			}
 		}
-	case chan Any:
-		return From((<-chan Any)(seq))
 	case *list.List:
 		return func(yield func(Any)) {
 			for e := seq.Front(); e != nil; e = e.Next() {
@@ -307,6 +305,16 @@ func From(x interface{}) Enumerator {
 				for i := 0; i < len; i++ {
 					e := v.Index(i)
 					yield(e.Interface())
+				}
+			}
+		} else if k == reflect.Chan {
+			return func(yield func(Any)) {
+				for {
+					value, ok := v.Recv()
+					if !ok {
+						break
+					}
+					yield(value)
 				}
 			}
 		}

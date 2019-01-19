@@ -36,6 +36,11 @@ func main() {
 ```
 
 Here `Any` is defined as an alias of `interface{}`.
+
+```Go
+type Any = interface{}
+```
+
 If you save the code as `range_select_example.go`, you can run it as follows:
 
 ```
@@ -68,7 +73,11 @@ func (loop Enumerator) Select(f func(Any) Any) Enumerator {
 }
 ```
 
-Note that `Enumerator` is just a function type defined as `func(func(Any))`.
+Here `Enumerator` is just a function type defined as `func(func(interface{}))`.
+
+```Go
+type Enumerator func(yield func(element Any))
+```
 
 `Range` is defined as follows:
 

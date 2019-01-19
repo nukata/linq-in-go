@@ -1,4 +1,4 @@
-// H25.1/21 - H31.1/4 by SUZUKI Hisao
+// H25.1/21 - H31.1/19 by SUZUKI Hisao
 
 package linq
 
@@ -71,10 +71,9 @@ func ExampleEnumerator_AggregateWithExit() {
 	x := seq.AggregateWithExit(100, func(a, b Any, exit func(Any)) Any {
 		if bi, ok := b.(int); ok {
 			return a.(int) * bi
-		} else {
-			exit(-1 * a.(int))
-			return nil // dummy
 		}
+		exit(-1 * a.(int))
+		return nil // dummy
 	})
 	Printf("%v\n", x)
 	// Output:
@@ -261,14 +260,12 @@ func ExampleFrom() {
 		Printf(" %#v", e)
 	}
 
-	ch := make(chan Any)
-	go func() {
-		ch <- "Funa"
-		ch <- "1-hachi"
-		ch <- "2-hachi"
-		close(ch)
-	}()
-	From(ch)(p) // chan Any
+	reader := strings.NewReader(
+		`A quick brown fox
+jumps over
+the lazy dogs.
+`)
+	From(reader)(p) // io.Reader
 	Println()
 
 	x := list.New()
@@ -293,10 +290,20 @@ func ExampleFrom() {
 	From([]interface{}{2, 7, "1", 8, 2, 8})(p)
 	Println()
 
+	ch := make(chan string)
+	go func() {
+		ch <- "Funa"
+		ch <- "1-hachi"
+		ch <- "2-hachi"
+		close(ch)
+	}()
+	From(ch)(p) // chan
+	Println()
+
 	From(2.71828)(p)
 	Println()
 	// Output:
-	//  "Funa" "1-hachi" "2-hachi"
+	//  "A quick brown fox" "jumps over" "the lazy dogs."
 	//  "Funa" "1-hachi" "2-hachi"
 	//  50 55 49 56 50 56
 	//  2 7 1 8 2 8
@@ -304,6 +311,7 @@ func ExampleFrom() {
 	//  2.7 1 8 2 8
 	//  "27" "1" "8" "2" "8"
 	//  2 7 "1" 8 2 8
+	//  "Funa" "1-hachi" "2-hachi"
 	//  2.71828
 }
 
@@ -313,9 +321,8 @@ func ExampleEnumerator_fizzBuzz() {
 		if i%3 == 0 {
 			if i%5 == 0 {
 				return "FizzBuzz"
-			} else {
-				return "Fizz"
 			}
+			return "Fizz"
 		} else if i%5 == 0 {
 			return "Buzz"
 		}
