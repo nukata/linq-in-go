@@ -1,6 +1,6 @@
-// H24.11/28 - H31.1/19 by SUZUKI Hisao
+// H24.11/28 - H31.1/22 by SUZUKI Hisao
 
-// Package linq implements a sort of "LINQ to Objects" in Go.
+// Package linq implements "LINQ to Objects" in Go.
 //
 // cf. https://docs.microsoft.com/dotnet/api/system.linq.enumerable
 //
@@ -274,7 +274,8 @@ func IntsFrom(n int) Enumerator {
 // If the argument is one of io.Reader, *list.List, string, slice, array
 // or chan, the Enumerator will yield each element of the argument.
 // Otherwise it will yield the whole argument as its sole element.
-// For io.Reader, it will yield each line as a string with (*Scanner) Text.
+// For io.Reader, it will yield each line as a string of (*Scanner) Text()
+// and may panic with (*Scanner) Err().
 func From(x interface{}) Enumerator {
 	switch seq := x.(type) {
 	case io.Reader:
@@ -282,6 +283,9 @@ func From(x interface{}) Enumerator {
 			scanner := bufio.NewScanner(seq)
 			for scanner.Scan() {
 				yield(scanner.Text())
+			}
+			if err := scanner.Err(); err != nil {
+				panic(err)
 			}
 		}
 	case *list.List:
