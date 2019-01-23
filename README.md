@@ -179,6 +179,11 @@ func From(x interface{}) Enumerator {
 ```
 
 There is only a typical loop of `bufio.Scanner` here.
-You will see this LINQ makes a _natural_ use of the Go language.
+
+It might be safe to say this LINQ makes a _natural_ use of the Go language,
+however, not a trivial use of it.
+See the definition of [Take](linq/linq.go#L130-L145) method.
+It calls an _escape procedure_ (passed in the manner of Scheme's `call/cc`)
+whose mechanism is implemented with `panic` and `recover` internally.
 
 For more examples, see [linq_test.go](linq/linq_test.go).
