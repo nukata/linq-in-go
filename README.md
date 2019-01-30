@@ -38,13 +38,13 @@ func main() {
 }
 ```
 
-Here `Any` is defined as an alias of `interface{}`.
+where `Any` is defined as an alias of `interface{}`.
 
 ```Go
 type Any = interface{}
 ```
 
-If you save the code as `range_select_example.go`, you can run it as follows:
+Save the code as `range_select_example.go` and you can run it as follows:
 
 ```
 $ go get github.com/nukata/linq-in-go/linq
@@ -62,27 +62,7 @@ $ go run range_select_example.go
 $ 
 ```
 
-`Select` method is defined as follows:
-
-```Go
-// Select creates an Enumerator which applies f to each of elements.
-func (loop Enumerator) Select(f func(Any) Any) Enumerator {
-        return func(yield func(Any)) {
-                loop(func(element Any) {
-                        value := f(element)
-                        yield(value)
-                })
-        }
-}
-```
-
-Here `Enumerator` is just a function type defined as `func(func(interface{}))`.
-
-```Go
-type Enumerator func(yield func(element Any))
-```
-
-`Range` is defined as follows:
+The function `Range` is defined as follows:
 
 ```Go
 // Range creates an Enumerator which counts from start
@@ -97,6 +77,25 @@ func Range(start, count int) Enumerator {
 }
 ```
 
+and `Select` method is defined as follows:
+
+```Go
+// Select creates an Enumerator which applies f to each of elements.
+func (loop Enumerator) Select(f func(Any) Any) Enumerator {
+        return func(yield func(Any)) {
+                loop(func(element Any) {
+                        value := f(element)
+                        yield(value)
+                })
+        }
+}
+```
+
+where `Enumerator` is just a function type defined as `func(func(interface{}))`.
+
+```Go
+type Enumerator func(yield func(element Any))
+```
 
 Now you have seen the _whole_ implementation of the example.
 The space complexity is O(1) and you can `yield` values
@@ -143,7 +142,7 @@ func main() {
 }
 ```
 
-You can run it as follows:
+Save the code as `read-in-linq.go` and you can run it as follows:
 
 ```
 $ go build read-in-linq.go
