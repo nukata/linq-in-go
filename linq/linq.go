@@ -1,8 +1,8 @@
-// H24.11/28 - H31.1/22 by SUZUKI Hisao
+// H24.11.28/R4.3.25 by SUZUKI Hisao
 
 // Package linq implements "LINQ to Objects" in Go.
 //
-// cf. https://docs.microsoft.com/dotnet/api/system.linq.enumerable
+// See https://docs.microsoft.com/dotnet/api/system.linq.enumerable
 //
 package linq
 
@@ -10,92 +10,85 @@ import (
 	"bufio"
 	"container/list"
 	"io"
-	"reflect"
 )
 
-// Any represents an element of a sequence.
-type Any = interface{}
-
-// Enumerator represents a sequence.
-// To be precise, it is a higher order function that applies the function
-// argument to each element of the sequence which Enumerator represents.
-type Enumerator func(yield func(element Any))
+// Enumerator represents a sequence abstractly.
+// In fact, it is a higher order function that applies its function argument
+// to each element of the sequence that Enumerator represents abstractly.
+type Enumerator[T any] func(yield func(element T))
 
 // ToList creates a list from the sequence which Enumerator represents.
-func (loop Enumerator) ToList() *list.List {
+func (loop Enumerator[T]) ToList() *list.List {
 	result := list.New()
-	loop(func(element Any) {
+	loop(func(element T) {
 		result.PushBack(element)
 	})
 	return result
 }
 
 // ToSlice creates a slice from the sequence which Enumerator represents.
-func (loop Enumerator) ToSlice() []Any {
+func (loop Enumerator[T]) ToSlice() []T {
 	lst := loop.ToList()
-	result := make([]Any, lst.Len())
+	result := make([]T, lst.Len())
 	i := 0
 	for element := lst.Front(); element != nil; element = element.Next() {
-		result[i] = element.Value
+		result[i] = element.Value.(T)
 		i++
 	}
 	return result
 }
 
-// Aggregate applies the given binary function f to seed with each of
-// elements e1, e2, ..., eN in the squence, resulting in
+// Aggregate applies the binary function f to seed with each of elements
+// e1, e2, ..., eN from loop, resulting in
 // f(f(...f(f(seed, e1), e2), ...), eN).
-func (loop Enumerator) Aggregate(seed Any, f func(Any, Any) Any) Any {
-	loop(func(element Any) {
+func Aggregate[S any, T any](f func(S, T) S, seed S, loop Enumerator[T]) S {
+	loop(func(element T) {
 		seed = f(seed, element)
 	})
 	return seed
 }
 
 // AggregateWithExit is a variant of Aggregate.
-// It gives an "exit" argument to the given function f.
+// It supplies an "exit" argument to the function f.
 // If f calls exit(x), the enumeration will terminate and x will be returned.
-func (loop Enumerator) AggregateWithExit(seed Any,
-	f func(Any, Any, func(Any)) Any) Any {
-	loop.LoopWithExit(func(element Any, rawExit func()) {
-		exit := func(x Any) {
+func AggregateWithExit[S any, T any](f func(S, T, func(S)) S,
+	seed S, loop Enumerator[T]) S {
+	loop.LoopWithExit(func(element T, _exit func()) {
+		exit := func(x S) {
 			seed = x
-			rawExit()
+			_exit()
 		}
 		seed = f(seed, element, exit)
 	})
 	return seed
 }
 
-// tokenT represents a token to break the enumeration.
-type tokenT int
-
-// recoverAsBreak makes the program recover from the panic which
-// had been raised with panic(&token).
-func recoverAsBreak(token *tokenT) {
-	r := recover()
-	if r != nil && r != token {
-		panic(r)
-	}
-}
+// tokenType represents a token to break the enumeration.
+type tokenType int
 
 // LoopWithExit calls f(element, exit) for each element of Enumerator.
 // If f calls exit(), the enumeration will terminate.
-func (loop Enumerator) LoopWithExit(f func(Any, func())) {
-	var token tokenT
-	defer recoverAsBreak(&token)
+func (loop Enumerator[T]) LoopWithExit(f func(T, func())) {
+	var token tokenType
+	defer func() {
+		// Recover from the panic if it had been raised with panic(&token).
+		r := recover()
+		if r != nil && r != &token {
+			panic(r)
+		}
+	}()
 	exit := func() {
 		panic(&token)
 	}
-	loop(func(element Any) {
+	loop(func(element T) {
 		f(element, exit)
 	})
 }
 
 // Select creates an Enumerator which applies f to each of elements.
-func (loop Enumerator) Select(f func(Any) Any) Enumerator {
-	return func(yield func(Any)) {
-		loop(func(element Any) {
+func Select[T any, R any](f func(T) R, loop Enumerator[T]) Enumerator[R] {
+	return func(yield func(R)) {
+		loop(func(element T) {
 			value := f(element)
 			yield(value)
 		})
@@ -104,12 +97,13 @@ func (loop Enumerator) Select(f func(Any) Any) Enumerator {
 
 // SelectMany creates an Enumerator which applies f to each of subsequences
 // and concatenates them to a single flat sequence.
-func (loop Enumerator) SelectMany(f func(Any) Enumerator) Enumerator {
-	return func(yield func(Any)) {
-		loop(func(element Any) {
-			loopOfLoop := f(element)
-			loopOfLoop(func(elementOfElement Any) {
-				yield(elementOfElement)
+func SelectMany[T any, R any](f func(T) Enumerator[R],
+	loop Enumerator[T]) Enumerator[R] {
+	return func(yield func(R)) {
+		loop(func(element T) {
+			eachLoop := f(element)
+			eachLoop(func(eachElement R) {
+				yield(eachElement)
 			})
 		})
 	}
@@ -117,9 +111,9 @@ func (loop Enumerator) SelectMany(f func(Any) Enumerator) Enumerator {
 
 // Where creates an Enumerator which selects elements by appling
 // predicate to each of them.
-func (loop Enumerator) Where(predicate func(Any) bool) Enumerator {
-	return func(yield func(Any)) {
-		loop(func(element Any) {
+func (loop Enumerator[T]) Where(predicate func(T) bool) Enumerator[T] {
+	return func(yield func(T)) {
+		loop(func(element T) {
 			if predicate(element) {
 				yield(element)
 			}
@@ -129,11 +123,11 @@ func (loop Enumerator) Where(predicate func(Any) bool) Enumerator {
 
 // Take creates an Enumerator which takes the first n elements from
 // the sequence.
-func (loop Enumerator) Take(n int) Enumerator {
-	return func(yield func(Any)) {
+func (loop Enumerator[T]) Take(n int) Enumerator[T] {
+	return func(yield func(T)) {
 		if n > 0 {
 			i := 0
-			loop.LoopWithExit(func(element Any, exit func()) {
+			loop.LoopWithExit(func(element T, exit func()) {
 				i++
 				yield(element)
 				if i >= n {
@@ -146,9 +140,9 @@ func (loop Enumerator) Take(n int) Enumerator {
 
 // TakeWhile creates an Enumerator which takes elements from the sequence
 // until predicate applied to the element results in false.
-func (loop Enumerator) TakeWhile(predicate func(Any) bool) Enumerator {
-	return func(yield func(Any)) {
-		loop.LoopWithExit(func(element Any, exit func()) {
+func (loop Enumerator[T]) TakeWhile(predicate func(T) bool) Enumerator[T] {
+	return func(yield func(T)) {
+		loop.LoopWithExit(func(element T, exit func()) {
 			if predicate(element) {
 				yield(element)
 			} else {
@@ -160,10 +154,10 @@ func (loop Enumerator) TakeWhile(predicate func(Any) bool) Enumerator {
 
 // Skip creates an Enumerator which skips the first n elements in the
 // sequence.
-func (loop Enumerator) Skip(n int) Enumerator {
-	return func(yield func(Any)) {
+func (loop Enumerator[T]) Skip(n int) Enumerator[T] {
+	return func(yield func(T)) {
 		i := 0
-		loop(func(element Any) {
+		loop(func(element T) {
 			if i >= n {
 				yield(element)
 			} else {
@@ -175,10 +169,10 @@ func (loop Enumerator) Skip(n int) Enumerator {
 
 // SkipWhile creates an Enumerator which skip elements until predicate
 // applied to the element results in false.
-func (loop Enumerator) SkipWhile(predicate func(Any) bool) Enumerator {
-	return func(yield func(Any)) {
+func (loop Enumerator[T]) SkipWhile(predicate func(T) bool) Enumerator[T] {
+	return func(yield func(T)) {
 		atHead := true
-		loop(func(element Any) {
+		loop(func(element T) {
 			if atHead {
 				if predicate(element) {
 					return
@@ -191,9 +185,9 @@ func (loop Enumerator) SkipWhile(predicate func(Any) bool) Enumerator {
 }
 
 // Concat concatenates two Enumerators loop and loop2.
-func (loop Enumerator) Concat(loop2 Enumerator) Enumerator {
-	return func(yield func(Any)) {
-		body := func(element Any) {
+func (loop Enumerator[T]) Concat(loop2 Enumerator[T]) Enumerator[T] {
+	return func(yield func(T)) {
+		body := func(element T) {
 			yield(element)
 		}
 		loop(body)
@@ -201,17 +195,18 @@ func (loop Enumerator) Concat(loop2 Enumerator) Enumerator {
 	}
 }
 
-// Zip creates an Enumerator which enumerates loop and loop2 in step,
+// Zip creates an Enumerator which enumerates loop1 and loop2 in step,
 // applying f to each element pair.
-func (loop Enumerator) Zip(loop2 Enumerator, f func(Any, Any) Any) Enumerator {
-	return func(yield func(Any)) {
-		dataChan := make(chan Any)
-		quitChan := make(chan Any, 1)
+func Zip[T any, U any, R any](f func(T, U) R,
+	loop1 Enumerator[T], loop2 Enumerator[U]) Enumerator[R] {
+	return func(yield func(R)) {
+		dataChan := make(chan U)
+		quitChan := make(chan bool, 1)
 		defer close(quitChan)
 
 		go sendForEach(loop2, quitChan, dataChan)
-		loop.LoopWithExit(func(element Any, exit func()) {
-			quitChan <- nil
+		loop1.LoopWithExit(func(element T, exit func()) {
+			quitChan <- true
 			element2, ok := <-dataChan
 			if ok {
 				value := f(element, element2)
@@ -223,10 +218,11 @@ func (loop Enumerator) Zip(loop2 Enumerator, f func(Any, Any) Any) Enumerator {
 	}
 }
 
-func sendForEach(loop Enumerator, quitChan <-chan Any, dataChan chan<- Any) {
+func sendForEach[U any](loop Enumerator[U],
+	quitChan <-chan bool, dataChan chan<- U) {
 	defer close(dataChan)
 
-	loop.LoopWithExit(func(element Any, exit func()) {
+	loop.LoopWithExit(func(element U, exit func()) {
 		_, ok := <-quitChan
 		if ok {
 			dataChan <- element
@@ -236,16 +232,15 @@ func sendForEach(loop Enumerator, quitChan <-chan Any, dataChan chan<- Any) {
 	})
 }
 
-// Empty returns an empty sequence.
-func Empty() Enumerator {
-	return func(yield func(Any)) {}
+// Empty[T] returns an empty Enumerator[T].
+func Empty[T any]() Enumerator[T] {
+	return func(yield func(T)) {}
 }
 
-// Range creates an Enumerator which counts from start
-// up to start + count - 1.
-func Range(start, count int) Enumerator {
+// Range creates an Enumerator which counts from start up to start+count-1.
+func Range(start, count int) Enumerator[int] {
 	end := start + count
-	return func(yield func(Any)) {
+	return func(yield func(int)) {
 		for i := start; i < end; i++ {
 			yield(i)
 		}
@@ -253,8 +248,8 @@ func Range(start, count int) Enumerator {
 }
 
 // Repeat creates an Enumerator which repeats element count times.
-func Repeat(element Any, count int) Enumerator {
-	return func(yield func(Any)) {
+func Repeat[T any](element T, count int) Enumerator[T] {
+	return func(yield func(T)) {
 		for i := 0; i < count; i++ {
 			yield(element)
 		}
@@ -262,68 +257,61 @@ func Repeat(element Any, count int) Enumerator {
 }
 
 // IntsFrom returns an infinite sequence of integers n, n+1, n+2, ...
-func IntsFrom(n int) Enumerator {
-	return func(yield func(Any)) {
+func IntsFrom(n int) Enumerator[int] {
+	return func(yield func(int)) {
 		for i := n; ; i++ {
 			yield(i)
 		}
 	}
 }
 
-// From creates an Enumerator from an argument.
-// If the argument is one of io.Reader, *list.List, string, slice, array
-// or chan, the Enumerator will yield each element of the argument.
-// Otherwise it will yield the whole argument as its sole element.
-// For io.Reader, it will yield each line as a string of (*Scanner) Text()
-// and may panic with (*Scanner) Err().
-func From(x interface{}) Enumerator {
-	switch seq := x.(type) {
-	case io.Reader:
-		return func(yield func(Any)) {
-			scanner := bufio.NewScanner(seq)
-			for scanner.Scan() {
-				yield(scanner.Text())
-			}
-			if err := scanner.Err(); err != nil {
-				panic(err)
-			}
-		}
-	case *list.List:
-		return func(yield func(Any)) {
-			for e := seq.Front(); e != nil; e = e.Next() {
-				yield(e.Value)
-			}
-		}
-	case string:
-		return func(yield func(Any)) {
-			for _, value := range seq {
-				yield(value)
-			}
-		}
-	default:
-		v := reflect.ValueOf(x)
-		k := v.Kind()
-		if k == reflect.Slice || k == reflect.Array {
-			return func(yield func(Any)) {
-				len := v.Len()
-				for i := 0; i < len; i++ {
-					e := v.Index(i)
-					yield(e.Interface())
-				}
-			}
-		} else if k == reflect.Chan {
-			return func(yield func(Any)) {
-				for {
-					value, ok := v.Recv()
-					if !ok {
-						break
-					}
-					yield(value)
-				}
-			}
+// From creates an Enumerator from a slice.
+func From[T ~[]E, E any](x T) Enumerator[E] {
+	return func(yield func(E)) {
+		for _, element := range x {
+			yield(element)
 		}
 	}
-	return func(yield func(Any)) {
-		yield(x)
+}
+
+// FromChan creates an Enumerator from a channel.
+func FromChan[T ~(<-chan E), E any](x T) Enumerator[E] {
+	return func(yield func(E)) {
+		for e := range x {
+			yield(e)
+		}
+	}
+}
+
+// FromString creates an Enumerator[rune] from a string.
+func FromString[S ~string](x S) Enumerator[rune] {
+	return func(yield func(rune)) {
+		for _, c := range x {
+			yield(c)
+		}
+	}
+}
+
+// FromList[T] creats an Enumerator[T] from a list.List.
+func FromList[T any](x *list.List) Enumerator[T] {
+	return func(yield func(T)) {
+		for e := x.Front(); e != nil; e = e.Next() {
+			yield(e.Value.(T))
+		}
+	}
+}
+
+// FromReader creats an Enumerator[string] from an io.Reader.
+// The enumerator will yield each line of scanner.Text() and may panic with
+// scanner.Err().
+func FromReader(x io.Reader) Enumerator[string] {
+	return func(yield func(string)) {
+		scanner := bufio.NewScanner(x)
+		for scanner.Scan() {
+			yield(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			panic(err)
+		}
 	}
 }

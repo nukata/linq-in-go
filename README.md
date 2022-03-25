@@ -1,27 +1,35 @@
 # LINQ in Go
 
-This is a revised implementation of "LINQ to Objects" in Go
-which I wrote and once presented at 
-<http://www.oki-osk.jp/esc/golang/linq3.html> in 2014.
+This is an extensively revised version of "LINQ to Objects" in Go
+which I had written and once presented at 
+<http://www.oki-osk.jp/esc/golang/linq3.html> (now broken link) in 2014.
 So it is not a newcomer, however, it seems still innovative:
 
-- The sequences are represented by functions abstractly.
+- The sequences are **represented by functions** abstractly.
 
 - LINQ methods are defined on functions directly.
 
-- Thus, the sequences are inherently lazy.
-  You can treat infinite sequences naturally.
+- Thus, the sequences are inherently **lazy**.
+  You can operate **infinite sequences** naturally.
   The code is concise and the space complexity is usually O(1).
   You can enjoy the best essence of C# LINQ in Go.
 
+Now in 2022, Go 1.18 comes with generics.  You can get rid of almost every type
+assersion such as `e.(int)`.  I have revised the LINQ in Go again.
 
-## Basics
 
-The code example of C#'s 
-[Enumerable.Range(Int32, Int32) Method](https://docs.microsoft.com/dotnet/api/system.linq.enumerable.range)
-can be written in Go with this `linq` package as follows:
+## Let's try
 
-```Go
+```
+$ go build
+$ ./example
+1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz 11 Fizz 13 14 FizzBuzz 16 17 Fizz 19
+$ 
+```
+
+Here you have run [`./fizzbuzz_example.go`](fizzbuzz_example.go):
+
+```go
 package main
 
 import (
@@ -29,160 +37,102 @@ import (
 	. "github.com/nukata/linq-in-go/linq"
 )
 
-// Generate a sequence of integers from 1 to 10 and then select their squares.
 func main() {
-	squares := Range(1, 10).Select(func(x Any) Any { return x.(int) * x.(int) })
-	squares(func(num Any) {
-		fmt.Println(num)
+	fizzbuzz := Select(func(i int) any {
+		if i%3 == 0 {
+			if i%5 == 0 {
+				return "FizzBuzz"
+			}
+			return "Fizz"
+		} else if i%5 == 0 {
+			return "Buzz"
+		}
+		return i
+	}, IntsFrom(1))
+
+	fizzbuzz.Take(19)(func(e any) {
+		fmt.Print(e, " ")
 	})
+	fmt.Println()
+	// Output:
+	// 1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz 11 Fizz 13 14 FizzBuzz 16 17 Fizz 19
 }
+
 ```
 
-where `Any` is defined as an alias of `interface{}`.
+You can run more examples and read the documentations:
+
+```
+$ cd linq
+$ go test
+PASS
+ok  	github.com/nukata/linq-in-go/linq	0.326s
+$ godoc -http=localhost:6060 &
+```
+
+Now open the web browser and see
+[http://localhost:6060/pkg/github.com/nukata/linq-in-go/linq/](http://localhost:6060/pkg/github.com/nukata/linq-in-go/linq/).
+
+
+
+## Basics
+
+In the above examle, the function `IntsFrom` returns an `Enumerator[int]` value
+and the variable `fizzbuzz` has an `Enumerator[any]` value.
+
+The type `Enumerator[T]` is defined as follows:
 
 ```Go
-type Any = interface{}
+// Enumerator represents a sequence abstractly.
+// In fact, it is a higher order function that applies its function argument
+// to each element of the sequence that Enumerator represents abstractly.
+type Enumerator[T any] func(yield func(element T))
 ```
 
-Save the code as `range_select_example.go` and you can run it as follows:
-
-```
-$ go get github.com/nukata/linq-in-go/linq
-$ go run range_select_example.go
-1
-4
-9
-16
-25
-36
-49
-64
-81
-100
-$ 
-```
-
-The function `Range` is defined as follows:
+the function `IntsFrom` is defined as follows:
 
 ```Go
-// Range creates an Enumerator which counts from start
-// up to start + count - 1.
-func Range(start, count int) Enumerator {
-	end := start + count
-	return func(yield func(Any)) {
-		for i := start; i < end; i++ {
+// IntsFrom returns an infinite sequence of integers n, n+1, n+2, ...
+func IntsFrom(n int) Enumerator[int] {
+	return func(yield func(int)) {
+		for i := n; ; i++ {
 			yield(i)
 		}
 	}
 }
 ```
 
-and `Select` method is defined as follows:
+and the function `Select` is defined as follows:
 
 ```Go
 // Select creates an Enumerator which applies f to each of elements.
-func (loop Enumerator) Select(f func(Any) Any) Enumerator {
-        return func(yield func(Any)) {
-                loop(func(element Any) {
-                        value := f(element)
-                        yield(value)
-                })
-        }
-}
-```
-
-where `Enumerator` is just a function type defined as `func(func(interface{}))`.
-
-```Go
-type Enumerator func(yield func(element Any))
-```
-
-Now you have seen the _whole_ implementation of the example.
-The space complexity is O(1) and you can `yield` values
-infinitely if you want.
-There is _no artificial_ data structure.
-
-
-## Working with Files
-
-Like C#'s LINQ, this LINQ works well with files.
-Consider the following example:
-
-```Go
-package main
-
-import (
-	"fmt"
-	. "github.com/nukata/linq-in-go/linq"
-	"log"
-	"os"
-	"strings"
-)
-
-// Open a file and print its contents in upper case up to 10 lines.
-func main() {
-	file, err := os.Open(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
+func Select[T any, R any](f func(T) R, loop Enumerator[T]) Enumerator[R] {
+	return func(yield func(R)) {
+		loop(func(element T) {
+			value := f(element)
+			yield(value)
+		})
 	}
-	defer func() {
-		file.Close()
-		if r := recover(); r != nil {
-			log.Fatal("panic: ", r)
-		}
-	}()
-
-	lines := From(file).Select(func(line interface{}) interface{} {
-		return strings.ToUpper(line.(string))
-	}).Take(10)
-
-	lines(func(line interface{}) {
-		fmt.Println(line)
-	})
 }
 ```
 
-Save the code as `read-in-linq.go` and you can run it as follows:
-
-```
-$ go build read-in-linq.go
-$ ./read-in-linq read-in-linq.go
-PACKAGE MAIN
-
-IMPORT (
-	"FMT"
-	. "GITHUB.COM/NUKATA/LINQ-IN-GO/LINQ"
-	"LOG"
-	"OS"
-	"STRINGS"
-)
-
-$ 
-```
-
-The definition of `From` begins as follows:
+Therefore, the variable `fizzbuzz`, which are defined as
 
 ```Go
-func From(x interface{}) Enumerator {
-	switch seq := x.(type) {
-	case io.Reader:
-		return func(yield func(Any)) {
-			scanner := bufio.NewScanner(seq)
-			for scanner.Scan() {
-				yield(scanner.Text())
-			}
-			if err := scanner.Err(); err != nil {
-				panic(err)
-			}
+fizzbuzz := Select(func(i int) any {
+	if i%3 == 0 {
+		if i%5 == 0 {
+			return "FizzBuzz"
 		}
+		return "Fizz"
+	} else if i%5 == 0 {
+		return "Buzz"
+	}
+	return i
+}, IntsFrom(1))
 ```
 
-There is only a typical loop of `bufio.Scanner` here.
+is actually a higher order function that yields (or repeatedly calls its function
+argument with an element of) FizzBuzz infinite sequence lazily.
 
-It might be safe to say this LINQ makes a _natural_ use of the Go language,
-however, not a trivial use of it.
-See the definition of [Take](linq/linq.go#L130-L145) method.
-It calls an _escape procedure_ (passed in the manner of Scheme's `call/cc`)
-whose mechanism is implemented with `panic` and `recover` internally.
-
-For more examples, see [linq_test.go](linq/linq_test.go).
+For more examples, see [linq/linq_test.go](linq/linq_test.go).
